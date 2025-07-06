@@ -1,4 +1,3 @@
-// src/services/firebase.ts
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -22,12 +21,11 @@ import {
   orderBy,
   limit,
   onSnapshot,
-  Timestamp,
   writeBatch,
   deleteDoc,
   documentId,
 } from 'firebase/firestore';
-import { auth, db } from '@/config/firebase';
+import { auth, db } from '@/lib/firebase';
 import { User, Event, Message, Conversation, Notification } from '@/types';
 
 // Helper function to generate IDs
@@ -465,8 +463,8 @@ export const getUserEvents = async (userId: string): Promise<Event[]> => {
   try {
     const eventsQuery = query(
       collection(db, 'events'),
-      where('createdBy', '==', userId),
-      orderBy('date', 'desc')
+      where('userId', '==', userId),
+      orderBy('startTime', 'desc')
     );
     
     const snapshot = await getDocs(eventsQuery);
@@ -591,7 +589,7 @@ export const sendMessage = async (message: Omit<Message, 'id'>): Promise<boolean
     
     // Add message to messages collection
     const messageRef = doc(collection(db, 'messages'));
-    const messageData = { ...message, id: messageRef.id };
+    const messageData = { ...message, id: messageRef.id, conversationId };
     await setDoc(messageRef, messageData);
 
     // Update or create conversation
@@ -818,7 +816,7 @@ export const conversationService = {
     }
   },
 
-  async update(conversationId: string, conversation: Conversation): Promise<boolean> {
+  async update(conversationId: string, conversation: Conversation): Promise<boolean> => {
     try {
       // Update conversation document
       await updateDoc(doc(db, 'conversations', conversationId), {
@@ -840,7 +838,7 @@ export const conversationService = {
     }
   },
 
-  async delete(conversationId: string): Promise<boolean> {
+  async delete(conversationId: string): Promise<boolean> => {
     try {
       const batch = writeBatch(db);
 
@@ -866,7 +864,7 @@ export const conversationService = {
     }
   },
 
-  async create(conversation: Conversation): Promise<boolean> {
+  async create(conversation: Conversation): Promise<boolean> => {
     try {
       await setDoc(doc(db, 'conversations', conversation.id), conversation);
       return true;
@@ -928,7 +926,7 @@ export const notificationService = {
     }
   },
 
-  async markAsRead(notificationId: string): Promise<boolean> {
+  async markAsRead(notificationId: string): Promise<boolean> => {
     try {
       await updateDoc(doc(db, 'notifications', notificationId), { read: true });
       return true;
@@ -938,7 +936,7 @@ export const notificationService = {
     }
   },
 
-  async deleteNotification(notificationId: string): Promise<boolean> {
+  async deleteNotification(notificationId: string): Promise<boolean> => {
     try {
       await deleteDoc(doc(db, 'notifications', notificationId));
       return true;
@@ -948,30 +946,29 @@ export const notificationService = {
     }
   },
 
-  async clearAllNotifications(userId: string): Promise<boolean> {
+  async clearAllNotifications(userId: string): Promise<boolean> => {
     try {
-      const notificationsQuery = query(
-        collection(db, 'notifications'),
-        where('userId', '==', userId)
-      );
-      
-      const snapshot = await getDocs(notificationsQuery);
-      const batch = writeBatch(db);
-      
-      snapshot.docs.forEach(doc => {
-        batch.delete(doc.ref);
-      });
-      
-      await batch.commit();
-      return true;
-    } catch (error) {
-      console.error('Clear all notifications error:', error);
-      return false;
-    }
-  },
+      const notificationsQuery = query(collection(db, 'notifications'),
+       where('userId', '==', userId)
+     );
+     
+     const snapshot = await getDocs(notificationsQuery);
+     const batch = writeBatch(db);
+     
+     snapshot.docs.forEach(doc => {
+       batch.delete(doc.ref);
+     });
+     
+     await batch.commit();
+     return true;
+   } catch (error) {
+     console.error('Clear all notifications error:', error);
+     return false;
+   }
+ },
 
-  // Add create method for compatibility
-  async create(notification: Omit<Notification, 'id'>): Promise<string | null> {
-    return this.createNotification(notification);
-  }
+ // Add create method for compatibility
+ async create(notification: Omit<Notification, 'id'>): Promise<string | null> {
+   return this.createNotification(notification);
+ }
 };
