@@ -4,8 +4,15 @@ import {
   conversationService,
   userService,
   notificationService,
+  getUserConversations,
+  getConversationMessages,
+  sendMessage as firebaseSendMessage,
 } from "@/services/firebase";
-import { generateId } from "@/utils/auth";
+
+// Helper function to generate IDs
+const generateId = (): string => {
+  return Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
+};
 
 export const useMessageStore = (userId?: string) => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -24,42 +31,43 @@ export const useMessageStore = (userId?: string) => {
       setIsLoading(true);
       setError(null);
       
-      const allConversations = await conversationService.getAll();
-      console.log("Retrieved all conversations:", allConversations.length);
+      // Use the simpler getUserConversations function
+      const userConversations = await getUserConversations(userId);
+      console.log("Retrieved user conversations:", userConversations.length);
       
       // Ensure we have valid data
-      if (!Array.isArray(allConversations)) {
-        console.warn("conversationService.getAll() did not return an array");
+      if (!Array.isArray(userConversations)) {
+        console.warn("getUserConversations() did not return an array");
         setConversations([]);
         setIsLoading(false);
         return;
       }
 
-      const userConversations = allConversations.filter((conv) => {
-        // Validate conversation structure
-        if (!conv || typeof conv !== 'object') {
-          console.warn("Invalid conversation object:", conv);
-          return false;
-        }
-
-        // Ensure participants is an array
-        if (!Array.isArray(conv.participants)) {
-          console.warn("Conversation participants is not an array:", conv.id, conv.participants);
-          return false;
-        }
-
-        return conv.participants.includes(userId);
-      });
-
-      console.log("Filtered user conversations:", userConversations.length);
+      // Load messages for each conversation
+      const conversationsWithMessages = await Promise.all(
+        userConversations.map(async (conv) => {
+          try {
+            const messages = await getConversationMessages(conv.id);
+            return {
+              ...conv,
+              messages: Array.isArray(messages) ? messages : []
+            };
+          } catch (err) {
+            console.error("Error loading messages for conversation:", conv.id, err);
+            return {
+              ...conv,
+              messages: []
+            };
+          }
+        })
+      );
 
       // Sort by last message timestamp with safe date handling
-      userConversations.sort((a, b) => {
+      conversationsWithMessages.sort((a, b) => {
         try {
           const timeA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
           const timeB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
           
-          // Check for invalid dates
           if (isNaN(timeA) || isNaN(timeB)) {
             console.warn("Invalid date in conversation sort:", { a: a.updatedAt, b: b.updatedAt });
             return 0;
@@ -72,12 +80,12 @@ export const useMessageStore = (userId?: string) => {
         }
       });
 
-      setConversations(userConversations);
+      setConversations(conversationsWithMessages);
       console.log("Successfully loaded conversations");
     } catch (err) {
       console.error("Error loading conversations:", err);
       setError(err instanceof Error ? err.message : "Failed to load conversations");
-      setConversations([]); // Set empty array on error
+      setConversations([]);
     } finally {
       setIsLoading(false);
     }
@@ -106,10 +114,10 @@ export const useMessageStore = (userId?: string) => {
 
       console.log("Sending message:", message);
 
-      // Add message to conversation
-      const messageAdded = await conversationService.addMessage(message);
-      if (!messageAdded) {
-        throw new Error("Failed to add message to conversation");
+      // Send message using Firebase service
+      const success = await firebaseSendMessage(message);
+      if (!success) {
+        throw new Error("Failed to send message");
       }
       
       // Refresh conversations
@@ -119,9 +127,7 @@ export const useMessageStore = (userId?: string) => {
       try {
         const allUsers = await userService.getAll();
         
-        if (!Array.isArray(allUsers)) {
-          console.warn("userService.getAll() did not return an array");
-        } else {
+        if (Array.isArray(allUsers)) {
           const sender = allUsers.find((u) => u && u.id === userId);
           
           if (sender && sender.fullName) {
@@ -139,12 +145,7 @@ export const useMessageStore = (userId?: string) => {
               createdAt: new Date().toISOString(),
             };
 
-            const notificationCreated = await notificationService.create(notification);
-            if (!notificationCreated) {
-              console.warn("Failed to create notification, but message was sent successfully");
-            }
-          } else {
-            console.warn("Sender not found or missing fullName:", sender);
+            await notificationService.create(notification);
           }
         }
       } catch (notifError) {
@@ -208,7 +209,6 @@ export const useMessageStore = (userId?: string) => {
         return;
       }
 
-      // Ensure messages is an array
       if (!Array.isArray(conversation.messages)) {
         console.warn("Conversation messages is not an array:", conversation.id);
         return;
@@ -216,7 +216,6 @@ export const useMessageStore = (userId?: string) => {
 
       let hasUnreadMessages = false;
       const updatedMessages = conversation.messages.map((message) => {
-        // Validate message object
         if (!message || typeof message !== 'object') {
           console.warn("Invalid message object:", message);
           return message;
@@ -409,10 +408,6 @@ export const useMessageStore = (userId?: string) => {
   // Real-time conversation updates (optional enhancement)
   const subscribeToConversations = useCallback(() => {
     if (!userId) return;
-
-    // This would set up a real-time listener for conversations
-    // Implementation depends on your Firebase service setup
-    // Example: return conversationService.subscribeToUserConversations(userId, setConversations);
     console.log("Real-time conversation subscription not implemented yet");
   }, [userId]);
 
