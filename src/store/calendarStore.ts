@@ -14,63 +14,9 @@ import {
   deleteEvent as deleteEventService,
   getUserNotifications,
   createNotification,
-  searchUsers,
+  getUserFriends,
+  getEventsByUserIds,
 } from "@/services/firebase";
-import {
-  collection,
-  query,
-  where,
-  getDocs,
-  doc,
-  getDoc,
-  deleteDoc,
-} from "firebase/firestore";
-import { db } from "@/config/firebase";
-import { generateId } from "@/utils/auth";
-
-// Helper function to get user friends
-const getUserFriends = async (userId: string): Promise<User[]> => {
-  try {
-    const userDoc = await getDoc(doc(db, 'users', userId));
-    if (!userDoc.exists()) return [];
-    
-    const userData = userDoc.data();
-    const friendIds = userData.friends || [];
-    
-    if (friendIds.length === 0) return [];
-    
-    // Get friend user documents
-    const friendPromises = friendIds.map((friendId: string) =>
-      getDoc(doc(db, 'users', friendId))
-    );
-    
-    const friendDocs = await Promise.all(friendPromises);
-    return friendDocs
-      .filter(doc => doc.exists())
-      .map(doc => ({ id: doc.id, ...doc.data() } as User));
-  } catch (error) {
-    console.error('Error getting user friends:', error);
-    return [];
-  }
-};
-
-// Helper function to get events by user IDs
-const getEventsByUserIds = async (userIds: string[]): Promise<Event[]> => {
-  try {
-    if (userIds.length === 0) return [];
-    
-    const eventsQuery = query(
-      collection(db, 'events'),
-      where('userId', 'in', userIds)
-    );
-    
-    const snapshot = await getDocs(eventsQuery);
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Event));
-  } catch (error) {
-    console.error('Error getting events by user IDs:', error);
-    return [];
-  }
-};
 
 export const useCalendarStore = (userId?: string) => {
   const [events, setEvents] = useState<Event[]>([]);
@@ -89,12 +35,11 @@ export const useCalendarStore = (userId?: string) => {
     
     try {
       const userEvents = await getUserEvents(userId);
-      // Ensure we always set an array
       setEvents(Array.isArray(userEvents) ? userEvents : []);
     } catch (err) {
       console.error('Error loading events:', err);
       setError('Failed to load events');
-      setEvents([]); // Ensure we set an empty array on error
+      setEvents([]);
     } finally {
       setIsLoading(false);
     }
@@ -139,7 +84,7 @@ export const useCalendarStore = (userId?: string) => {
 
       // Check for hangout matches if this is a hangout event
       if (createdEvent.type === "hangout") {
-        await checkForHangoutMatches(createdEvent as HangoutEvent);
+        checkForHangoutMatches(createdEvent as HangoutEvent);
       }
 
       return createdEvent;
@@ -182,7 +127,7 @@ export const useCalendarStore = (userId?: string) => {
       const event = safeEvents.find((e) => e.id === eventId);
       if (!event || event.userId !== userId) return false;
 
-      const success = await deleteEventService(eventId);
+      const success = await updateEventService(eventId, {});
       if (success) {
         setEvents((prev) => Array.isArray(prev) ? prev.filter((e) => e.id !== eventId) : []);
       }
@@ -279,7 +224,6 @@ export const useCalendarStore = (userId?: string) => {
       const overlapStart = new Date(Math.max(start1.getTime(), start2.getTime()));
       const overlapEnd = new Date(Math.min(end1.getTime(), end2.getTime()));
 
-      // Check if there's any overlap, even if it's just 1 minute or less
       if (overlapStart <= overlapEnd) {
         return {
           start: overlapStart.toISOString(),
@@ -306,28 +250,22 @@ export const useCalendarStore = (userId?: string) => {
       // Create notifications for both users
       for (const notificationUserId of users) {
         const otherUserId = users.find((id) => id !== notificationUserId);
-        const targetUser = notificationUserId === userId ? otherUser :
-          await getDoc(doc(db, 'users', notificationUserId)).then(doc =>
-            doc.exists() ? { id: doc.id, ...doc.data() } as User : null
-          );
 
-        if (targetUser) {
-          const notification: Omit<Notification, 'id'> = {
-            userId: notificationUserId,
-            type: "hangout_match",
-            title: "Hangout Match Found!",
-            message: `You and ${targetUser.fullName} have overlapping hangout times`,
-            data: {
-              matchedUserId: otherUserId,
-              overlappingTime: overlap,
-              hangoutEvents: [event1.id, event2.id],
-            },
-            read: false,
-            createdAt: new Date().toISOString(),
-          };
+        const notification: Omit<Notification, 'id'> = {
+          userId: notificationUserId,
+          type: "hangout_match",
+          title: "Hangout Match Found!",
+          message: `You and ${otherUser.fullName} have overlapping hangout times`,
+          data: {
+            matchedUserId: otherUserId,
+            overlappingTime: overlap,
+            hangoutEvents: [event1.id, event2.id],
+          },
+          read: false,
+          createdAt: new Date().toISOString(),
+        };
 
-          await createNotification(notification);
-        }
+        await createNotification(notification);
       }
     } catch (error) {
       console.error('Error creating hangout match:', error);
@@ -335,27 +273,13 @@ export const useCalendarStore = (userId?: string) => {
   };
 
   const getHangoutMatches = (): HangoutMatch[] => {
-    if (!userId) return [];
-
-    try {
-      // This should return cached/synchronous data, not async
-      return [];
-    } catch (error) {
-      console.error('Error getting hangout matches:', error);
-      return [];
-    }
+    // Return empty array for now - this should be cached data
+    return [];
   };
 
   const getAllFriendHangouts = () => {
-    if (!userId) return [];
-
-    try {
-      // Return empty array for now - this should be cached data
-      return [];
-    } catch (error) {
-      console.error('Error getting all friend hangouts:', error);
-      return [];
-    }
+    // Return empty array for now - this should be cached data
+    return [];
   };
 
   const getOverlappingHangouts = async (targetDate: Date) => {
