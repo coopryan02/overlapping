@@ -1,4 +1,3 @@
-// src/store/authStore.tsx
 import {
   useState,
   useEffect,
